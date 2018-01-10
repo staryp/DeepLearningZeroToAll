@@ -14,14 +14,14 @@ train["Sex"][train["Sex"] == "male"] = 0
 train["Sex"][train["Sex"] == "female"] = 1
 
 titanicX = train[ ["Age","Pclass","Fare","Sex"] ].values
-titanicY = train[ ["Survived"] ].values
+SurvivedOneHot = pd.get_dummies(train['Survived'])
+titanicY = SurvivedOneHot.values
 
 test['Age'].fillna(test['Age'].median(), inplace=True )
 test["Sex"][test["Sex"] == "male"] = 0
 test["Sex"][test["Sex"] == "female"] = 1
 
 testX = test[ ["Age","Pclass","Fare","Sex"] ].values
-testY = test[ ["Survived"] ].values
 
 
 # parameters
@@ -31,20 +31,32 @@ batch_size = 10
 
 # input place holders
 X = tf.placeholder(tf.float32, [None, 4])
-Y = tf.placeholder(tf.float32, [None, 1])
+Y = tf.placeholder(tf.float32, [None, 2])
 
-# weights & bias for nn layers
-W1 = tf.Variable(tf.random_normal([4, 10]))
-b1 = tf.Variable(tf.random_normal([10]))
+W1 = tf.get_variable("W1", shape=[4, 512],
+                     initializer=tf.contrib.layers.xavier_initializer())
+b1 = tf.Variable(tf.random_normal([512]))
 L1 = tf.nn.relu(tf.matmul(X, W1) + b1)
 
-W2 = tf.Variable(tf.random_normal([10, 10]))
-b2 = tf.Variable(tf.random_normal([10]))
+W2 = tf.get_variable("W2", shape=[512, 512],
+                     initializer=tf.contrib.layers.xavier_initializer())
+b2 = tf.Variable(tf.random_normal([512]))
 L2 = tf.nn.relu(tf.matmul(L1, W2) + b2)
 
-W3 = tf.Variable(tf.random_normal([10, 1]))
-b3 = tf.Variable(tf.random_normal([1]))
-hypothesis = tf.matmul(L2, W3) + b3
+W3 = tf.get_variable("W3", shape=[512, 512],
+                     initializer=tf.contrib.layers.xavier_initializer())
+b3 = tf.Variable(tf.random_normal([512]))
+L3 = tf.nn.relu(tf.matmul(L2, W3) + b3)
+
+W4 = tf.get_variable("W4", shape=[512, 512],
+                     initializer=tf.contrib.layers.xavier_initializer())
+b4 = tf.Variable(tf.random_normal([512]))
+L4 = tf.nn.relu(tf.matmul(L3, W4) + b4)
+
+W5 = tf.get_variable("W5", shape=[512, 2],
+                     initializer=tf.contrib.layers.xavier_initializer())
+b5 = tf.Variable(tf.random_normal([2]))
+hypothesis = tf.matmul(L4, W5) + b5
 
 # define cost/loss & optimizer
 cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
@@ -73,7 +85,7 @@ for epoch in range(training_epochs):
 
     print('Epoch:', '%04d' % (epoch + 1), 'cost =', '{:.9f}'.format(avg_cost))
 
-
+print(sess.run([hypothesis], feed_dict={X: testX}))
 
 # for step in range(2001):
 #     cost_val, hy_val, _ = sess.run([cost, optimizer],feed_dict={X: tatanicX, Y: tatanicY})

@@ -14,7 +14,8 @@ train["Sex"][train["Sex"] == "male"] = 0
 train["Sex"][train["Sex"] == "female"] = 1
 
 x_data = train[ ["Age","Pclass","Fare","Sex"] ].values
-y_data = train[ ["Survived"] ].values
+SurvivedOneHot = pd.get_dummies(train['Survived'])
+y_data = SurvivedOneHot.values
 
 test['Age'].fillna(test['Age'].median(), inplace=True )
 test["Sex"][test["Sex"] == "male"] = 0
@@ -25,20 +26,18 @@ x_test_data = test[ ["Age","Pclass","Fare","Sex"] ].values
 
 # placeholders for a tensor that will be always fed.
 X = tf.placeholder(tf.float32, shape=[None, 4])
-Y = tf.placeholder(tf.float32, shape=[None, 1])
+Y = tf.placeholder(tf.float32, shape=[None, 2])
 
-W = tf.Variable(tf.random_normal([4, 1]), name='weight')
-b = tf.Variable(tf.random_normal([1]), name='bias')
+W = tf.Variable(tf.random_normal([4, 2]), name='weight')
+b = tf.Variable(tf.random_normal([2]), name='bias')
 
-# Hypothesis
-hypothesis = tf.matmul(X, W) + b
+hypothesis = tf.sigmoid(tf.matmul(X, W) + b)
 
-# Simplified cost/loss function
-cost = tf.reduce_mean(tf.square(hypothesis - Y))
+# cost/loss function
+cost = -tf.reduce_mean(Y * tf.log(hypothesis) + (1 - Y) *
+                       tf.log(1 - hypothesis))
 
-# Minimize
-optimizer = tf.train.GradientDescentOptimizer(learning_rate=1e-5)
-train = optimizer.minimize(cost)
+train = tf.train.GradientDescentOptimizer(learning_rate=0.01).minimize(cost)
 
 # Launch the graph in a session.
 sess = tf.Session()
