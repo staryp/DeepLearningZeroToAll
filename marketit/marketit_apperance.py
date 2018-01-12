@@ -1,66 +1,114 @@
-from darkflow.net.build import TFNet
 import cv2
-import tensorflow as tf
 from matplotlib import pyplot as plt
+from PIL import Image
 import pandas as pd
 import numpy as np
-import random
 import requests
 import os
 import shutil
 import urllib
 import re
+import cuter
+import tensorflow as tf
+import numpy as np
+import copy
 
-os.getcwd()
-os.chdir("/home/ubuntu/darkflow")
+targetDir = 'C:/work/staryp/DeepLearningZeroToAll/marketit/input'
+label_csv = pd.read_csv("C:/work/staryp/DeepLearningZeroToAll/marketit/apperance_score.csv")
 
-options = {"model": "./cfg/yolo.cfg", "load": "./bin/yolo.weights", "threshold": 0.6, "gpu": 1.0}
-tfnet = TFNet(options)
+batch_size = 15
 
-rootDir = '/home/ubuntu/jupyter-home/appearance_ml/input'
-targetDir = '/home/ubuntu/jupyter-home/appearance_ml/input2'
 
-limit = 50000 # 최대 검사할 이미지 숫자
+train_filenames = []
+train_labels = []
 
-x_data =[]
-y_data =[]
+test_filenames = []
+test_labels = []
 
-test_x_data =[]
-test_y_data =[]
+def read_images_from_disk(input_queue):
+    ### queue[0] = name of images / queue[1] = labels of images
+    label = input_queue[1]
+    ### queue의 내용을 읽어서 image의 내용을 불러온 뒤, jpeg형식으로 디코딩.
+    file_contents = tf.read_file(input_queue[0])
+    example = tf.image.decode_jpeg(file_contents, channels=3)
+    ### 원래 이미지의 모양으로 만들어줌. 
+    example.set_shape([300, 300, 3])
+    return example, label
 
-for dirName, subdirList, fileList in os.walk(rootDir):
+for dirName, subdirList, fileList in os.walk(targetDir):
     
-    uid = dirName.split("/")[-1]
     idx = 0
     for fname in fileList:
+
         if re.search('\.jpg$', fname) :
-            
-            # load image
+
             imgPath = '%s/%s' % (dirName,fname)
-            img = cv2.imread(imgPath)
+            x,b =fname.split('.')
+            id,_=x.split('_')
+            d =  label_csv.loc[label_csv['id'] == float(id)]
+            newrow = d['value'].values
+            arr = [0 for _ in range(5)]
             
-        
-    if limit <= 0:
-        break
+            print(newrow)
+            if not newrow:
+                arr[int(2)] = 1
+            elif newrow[0].count('하') > 0:
+                arr[int(0)] = 1
+            elif newrow[0].count('중') > 0:
+                arr[int(1)] = 1
+            elif newrow[0].count('중상') > 0:
+                arr[int(2)] = 1
+            elif newrow[0].count('상') > 0:    
+                arr[int(3)] = 1
+            elif newrow[0].count('최상') > 0:
+                arr[int(4)] = 1
+            else:
+                arr[int(2)] = 1
+    
+            if idx < 800:
+                train_filenames.append(imgPath)
+                train_labels.append(arr)
+            else:
+                test_filenames.append(imgPath)
+                test_labels.append(arr)
 
-train = pd.read_csv("apperanve_score.csv")
+
+            print(idx)
+            idx = idx+1
 
 
-tf.set_random_seed(777)  # reproducibility
+#train data
+train_images = tf.convert_to_tensor(train_filenames, dtype = tf.string)
+train_img_labels = tf.convert_to_tensor(train_labels, dtype = tf.int32)
 
-# mnist = input_data.read_data_sets("MNIST_data/", one_hot=True)
-# Check out https://www.tensorflow.org/get_started/mnist/beginners for
-# more information about the mnist dataset
+train_input_queue = tf.train.slice_input_producer([train_images, train_img_labels], num_epochs=None, shuffle=True)
+train_image_list, train_label_list = read_images_from_disk(train_input_queue)
+
+train_image_batch = tf.train.batch([train_image_list, train_label_list], batch_size=batch_size)
+
+#test data
+test_images = tf.convert_to_tensor(test_filenames, dtype = tf.string)
+test_img_labels = tf.convert_to_tensor(test_labels, dtype = tf.int32)
+
+test_input_queue = tf.train.slice_input_producer([test_images, test_img_labels], num_epochs=None, shuffle=True)
+test_image_list, test_label_list = read_images_from_disk(test_input_queue)
+
+test_image_batch = tf.train.batch([test_image_list, test_label_list], batch_size=batch_size)
+
+
+
 
 # hyper parameters
 learning_rate = 0.001
 training_epochs = 15
-batch_size = 100
+
+# dropout (keep_prob) rate  0.7~0.5 on training, but should be 1 for testing
+keep_prob = tf.placeholder(tf.float32)
 
 # input place holders
-X = tf.placeholder(tf.float32, [None, 784])
-X_img = tf.reshape(X, [-1, 28, 28, 1])   # img 28x28x1 (black/white)
-Y = tf.placeholder(tf.float32, [None, 10])
+X = tf.placeholder(tf.float32, [None, 270000])
+X_img = tf.reshape(X, [-1, 300, 300, 3])   # img 28x28x1 (black/white)
+Y = tf.placeholder(tf.float32, [None, 5])
 
 # L1 ImgIn shape=(?, 28, 28, 1)
 W1 = tf.Variable(tf.random_normal([3, 3, 1, 32], stddev=0.01))
@@ -70,11 +118,8 @@ L1 = tf.nn.conv2d(X_img, W1, strides=[1, 1, 1, 1], padding='SAME')
 L1 = tf.nn.relu(L1)
 L1 = tf.nn.max_pool(L1, ksize=[1, 2, 2, 1],
                     strides=[1, 2, 2, 1], padding='SAME')
-'''
-Tensor("Conv2D:0", shape=(?, 28, 28, 32), dtype=float32)
-Tensor("Relu:0", shape=(?, 28, 28, 32), dtype=float32)
-Tensor("MaxPool:0", shape=(?, 14, 14, 32), dtype=float32)
-'''
+L1 = tf.nn.dropout(L1, keep_prob=keep_prob)
+
 
 # L2 ImgIn shape=(?, 14, 14, 32)
 W2 = tf.Variable(tf.random_normal([3, 3, 32, 64], stddev=0.01))
@@ -84,57 +129,82 @@ L2 = tf.nn.conv2d(L1, W2, strides=[1, 1, 1, 1], padding='SAME')
 L2 = tf.nn.relu(L2)
 L2 = tf.nn.max_pool(L2, ksize=[1, 2, 2, 1],
                     strides=[1, 2, 2, 1], padding='SAME')
-L2_flat = tf.reshape(L2, [-1, 7 * 7 * 64])
-'''
-Tensor("Conv2D_1:0", shape=(?, 14, 14, 64), dtype=float32)
-Tensor("Relu_1:0", shape=(?, 14, 14, 64), dtype=float32)
-Tensor("MaxPool_1:0", shape=(?, 7, 7, 64), dtype=float32)
-Tensor("Reshape_1:0", shape=(?, 3136), dtype=float32)
-'''
+L2 = tf.nn.dropout(L2, keep_prob=keep_prob)
 
-# Final FC 7x7x64 inputs -> 10 outputs
-W3 = tf.get_variable("W3", shape=[7 * 7 * 64, 10],
+# L3 ImgIn shape=(?, 7, 7, 64)
+W3 = tf.Variable(tf.random_normal([3, 3, 64, 128], stddev=0.01))
+#    Conv      ->(?, 7, 7, 128)
+#    Pool      ->(?, 4, 4, 128)
+#    Reshape   ->(?, 4 * 4 * 128) # Flatten them for FC
+L3 = tf.nn.conv2d(L2, W3, strides=[1, 1, 1, 1], padding='SAME')
+L3 = tf.nn.relu(L3)
+L3 = tf.nn.max_pool(L3, ksize=[1, 2, 2, 1], strides=[
+                    1, 2, 2, 1], padding='SAME')
+L3 = tf.nn.dropout(L3, keep_prob=keep_prob)
+L3 = tf.reshape(L3, [-1, 128 * 4 * 4])
+
+# L4 FC 4x4x128 inputs -> 625 outputs
+W4 = tf.get_variable("W4", shape=[128 * 4 * 4, 625],
                      initializer=tf.contrib.layers.xavier_initializer())
-b = tf.Variable(tf.random_normal([10]))
-logits = tf.matmul(L2_flat, W3) + b
+b4 = tf.Variable(tf.random_normal([625]))
+L4 = tf.nn.relu(tf.matmul(L3, W4) + b4)
+L4 = tf.nn.dropout(L4, keep_prob=keep_prob)
+
+# L5 Final FC 625 inputs -> 10 outputs
+W5 = tf.get_variable("W5", shape=[625, 10],
+                     initializer=tf.contrib.layers.xavier_initializer())
+b5 = tf.Variable(tf.random_normal([10]))
+hypothesis = tf.matmul(L4, W5) + b5
+
 
 # define cost/loss & optimizer
 cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
-    logits=logits, labels=Y))
+    logits=hypothesis, labels=Y))
 optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(cost)
 
-# initialize
-sess = tf.Session()
-sess.run(tf.global_variables_initializer())
 
-# train my model
-print('Learning started. It takes sometime.')
-for epoch in range(training_epochs):
-    avg_cost = 0
-    total_batch = int(mnist.train.num_examples / batch_size)
+with tf.device('/device:GPU:0'):
+    # initialize
+    sess = tf.Session()
+    sess.run(tf.global_variables_initializer())
 
-    for i in range(total_batch):
-        batch_xs, batch_ys = mnist.train.next_batch(batch_size)
-        feed_dict = {X: batch_xs, Y: batch_ys}
-        c, _ = sess.run([cost, optimizer], feed_dict=feed_dict)
-        avg_cost += c / total_batch
+    # train my model
+    print('Learning stared. It takes sometime.')
 
-    print('Epoch:', '%04d' % (epoch + 1), 'cost =', '{:.9f}'.format(avg_cost))
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(sess=sess, coord=coord)
 
-print('Learning Finished!')
+    c, _, image_tensor = sess.run([cost, optimizer,train_image_batch], feed_dict=train_image_batch) # image_batch tensor를 session에서 돌린다.
 
-# Test model and check accuracy
-correct_prediction = tf.equal(tf.argmax(logits, 1), tf.argmax(Y, 1))
-accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-print('Accuracy:', sess.run(accuracy, feed_dict={
-      X: mnist.test.images, Y: mnist.test.labels}))
+    for i in range(batch_size):
+        plt.imshow(image_tensor[0][i])
+        print (image_tensor[1][i])
+        plt.show()
 
-# Get one and predict
-r = random.randint(0, mnist.test.num_examples - 1)
-print("Label: ", sess.run(tf.argmax(mnist.test.labels[r:r + 1], 1)))
-print("Prediction: ", sess.run(
-    tf.argmax(logits, 1), feed_dict={X: mnist.test.images[r:r + 1]}))
+    coord.request_stop()
+    coord.join(threads)
 
-# plt.imshow(mnist.test.images[r:r + 1].
-#           reshape(28, 28), cmap='Greys', interpolation='nearest')
-# plt.show()
+
+with tf.device('/device:GPU:0'):
+    sess = tf.Session()
+    init = tf.global_variables_initializer()
+    sess.run(init)
+
+    # Training step
+    for i in range(iterations):
+        _, step_loss = sess.run([train, loss], feed_dict={
+                                X: trainX, Y: trainY, drop_out_ratio:dropout_ratio})
+        if i % 20 == 0:
+            print("[step: {}] loss: {}".format(i, step_loss))
+    
+    test_predict = sess.run(Y_pred, feed_dict={X: testX, drop_out_ratio:1.0})
+    rmse_val = sess.run(rmse, feed_dict={targets: testY, predictions: test_predict})
+    print("RMSE: {}".format(rmse_val))
+
+plt.figure(figsize=(15,10))
+plt.plot([v for v in testY[0:500] ], label='real')
+plt.plot([v for v in test_predict[0:500]], label='predict')
+plt.xlabel("Time Period")
+plt.ylabel("Stock Price")
+plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
+plt.show()
